@@ -20,7 +20,7 @@
         src = ./.;
 
         nativeBuildInputs =  [ setuptools ];
-        propagtedBuildInputs = [ requests ];
+        propagatedBuildInputs = [ requests ];
       };
   };
 }
