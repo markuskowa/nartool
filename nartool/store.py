@@ -412,9 +412,9 @@ class NarStore:
 
             tmp_name = os.path.join(nar_path, hash + '.tmp')
             cmd = cmd + tmp_name
-            print(cmd)
 
             # Compress file
+            print("re-compressing {}: {} -> {}".format(hash, info.Compression, compression))
             os.system(cmd);
 
             # Get hash
