@@ -19,6 +19,8 @@ def main():
 
     argsGetFiles = cmdArgs.add_parser("get", help="Get a list of all files beloning to closure")
     argsGetFiles.add_argument("-a", "--hash", help="Only get files for specific hash")
+    argsGetFiles.add_argument("-l", "--listhashes", action='store_true', help="List nix store hashes instead of path names")
+    argsGetFiles.add_argument("-r", "--relative", action='store_true', help="Path names relative to storedir")
 
     argsOrphans = cmdArgs.add_parser("orphans", help="Find orphaned NAR files")
     argsOrphans.add_argument("-n", "--nardir", help="NAR subdirectory relative to store dir. Defaults to 'nar'")
@@ -62,10 +64,13 @@ def main():
         else:
             closure = ns.get_closure(check_nix_hash(args.hash))
 
-        files = ns.get_closure_files(closure)
-
-        for f in files:
-            print(f)
+        if args.listhashes:
+            for hash in closure:
+                print(hash)
+        else:
+            files = ns.get_closure_files(closure, args.relative)
+            for f in files:
+                print(f)
 
     elif args.command == "cache":
         if args.hash == None:

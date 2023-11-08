@@ -249,13 +249,17 @@ class NarStore:
         return closure_complete
 
 
-    def get_closure_files(self, closure: Closure) -> List[str]:
+    def get_closure_files(self, closure: Closure, relative: bool = False) -> List[str]:
         '''Get a list of all files that belong to closure
         '''
         files = []
         for hash, info in closure.items():
-            files.append(os.path.join(self.store_dir, hash) + ".narinfo")
-            files.append(os.path.join(self.store_dir, info.URL))
+            if relative:
+                files.append(hash + ".narinfo")
+                files.append(info.URL)
+            else:
+                files.append(os.path.join(self.store_dir, hash + ".narinfo"))
+                files.append(os.path.join(self.store_dir, info.URL))
 
         return files
 
