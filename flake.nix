@@ -13,7 +13,7 @@
     in
       buildPythonApplication {
         pname = "nartool";
-        version = "0.0.1";
+        version = "0.0.2";
 
         format = "pyproject";
 
