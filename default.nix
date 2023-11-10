@@ -14,6 +14,6 @@ in buildPythonApplication {
   src = ./.;
 
   nativeBuildInputs =  [ setuptools ];
-  propagtedBuildInputs = [ requests ];
+  propagatedBuildInputs = [ requests ];
 }
 

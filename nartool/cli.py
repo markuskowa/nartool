@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-Only
 
 import sys
+import os
 import argparse as ap
 
 from .store import NarStore
@@ -34,9 +35,15 @@ def main():
     argsFetch.add_argument("-c", "--caches", nargs=1, default=["https://cache.nixos.org"], help="Comma separated list of cache URLs")
     argsFetch.add_argument("-i", "--input", default=sys.stdin, help="Input file with hashes")
 
-    argsFetch = cmdArgs.add_parser("compress", help="(Re)compress NAR files. Original files will not be deleted!")
-    argsFetch.add_argument("-c", "--compression", nargs=1, default=['xz'], help="Target compression [xz, zstd, none]")
-    argsFetch.add_argument("-i", "--input", default=sys.stdin, help="Input file with hashes")
+    argsCompress = cmdArgs.add_parser("compress", help="(Re)compress NAR files. Original files will not be deleted!")
+    argsCompress.add_argument("-z", "--compression", nargs=1, default=['xz'], help="Target compression [xz, zstd, none]")
+    argsCompress.add_argument("-i", "--input", default=sys.stdin, help="Input file with hashes")
+
+    argsCopy = cmdArgs.add_parser("nixcopy", help="Copy closure from nix store to binary cache")
+    argsCopy.add_argument("-z", "--compression", nargs=1, default=['xz'], help="Target compression [xz, zstd, none]")
+    argsCopy.add_argument("-s", "--skipcached", action="store_true", help="Skip all paths available in cache")
+    argsCopy.add_argument("-c", "--caches", nargs=1, default=["https://cache.nixos.org"], help="Comma separated list of cache URLs")
+    argsCopy.add_argument("path", help="Store path")
 
     args = argsMain.parse_args()
 
@@ -104,7 +111,20 @@ def main():
         with open(args.input, 'r') as file:
             lines = file.read().split("\n")
             hashes = filter(lambda line: line.strip() != '', lines)
-            ns.recompress_nar(list(hashes), args.compression[0])
+            size_old, size_new = ns.recompress_nar(list(hashes), args.compression[0])
+
+            diff = size_old - size_new
+            perc = float(diff)/float(size_old) * 100.0
+            print("Old size {}, new size {}, saved {} ({:.2f} %)".format(size_old, size_new, diff, perc))
+
+    elif args.command == "nixcopy":
+        if args.skipcached:
+            caches = args.caches[0].split(",")
+        else:
+            caches = []
+
+        copied, cached = ns.nix_copy(os.path.realpath(args.path), caches, args.compression[0])
+        print("Copied {} paths, skipped {} cached paths".format(copied, cached))
 
 if __name__ == '__main__':
     main()

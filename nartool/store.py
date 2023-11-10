@@ -46,24 +46,63 @@ def hash_from_name(name: str) -> str:
 class NarInfo:
     StorePath: str
     URL: str
-    Compression: str
     NarHash: str
     NarSize: int
     Sig: List[str]
     References: List[str]
+    Compression: str = "none"
     FileHash: typing.Optional[str] = None
     FileSize: typing.Optional[int] = None
     Deriver: typing.Optional[str] = None
     System: typing.Optional[str] = None
     CA: typing.Optional[str] = None
 
-    def __init__(self):
+    def __init__(self, text: typing.Optional[str] = None):
         self.Sig = []
         self.References = []
         self.Deriver = None
 
-    def __repr__(self):
+        if text != None:
+            for line in text.split("\n"):
+                kv = line.split(': ')
+                if len(kv) == 2:
+                    key = kv[0]
+                    value = kv[1].strip()
+
+                    if key == "FileSize" or key == "NarSize":
+                        value = int(value)
+
+                    if key == "Sig":
+                        self.Sig.append(value)
+                    elif key == "References":
+                        self.References = value.split(" ")
+                        if len(self.References) > 0 and len(self.References[-1]) == 0:
+                            self.References.pop()
+                    else:
+                        setattr(self, key, value)
+
+    def to_str(self) -> str:
+
+        text = ""
+        for field in [a for a in dir(self) if not (a.startswith('__') or a.startswith('to_'))]:
+            value = getattr(self, field)
+            if type(value) == list:
+                if not value:
+                    value = None
+                else:
+                    value = " ".join(value)
+            if value != None:
+                text = text + field + ": " + str(value) + "\n"
+
+
+        return text
+
+    def to_json(self) -> str:
         return json.dumps(asdict(self))
+
+
+    def __repr__(self):
+        return self.to_json()
 
 class Closure(dict):
     '''Represent a closure of narinfo files
@@ -101,6 +140,55 @@ class Closure(dict):
 
         super().__setitem__(key, value)
 
+class NixStore:
+    def __init__(self):
+        self.store_dir = "/nix/store"
+
+    def narinfo(self, path) -> NarInfo:
+        ''' Returns an incomplete NarInfo
+        '''
+
+        if path[0] != "/":
+            path = os.path.join(self.store_dir, path)
+
+        path_info = subprocess.run(['nix', 'path-info', '--json', path], stdout=subprocess.PIPE).stdout.decode().strip()
+        path_info = json.loads(path_info)[0]
+
+        # construct
+        info = NarInfo()
+        info.URL = ""
+        info.StorePath = path_info['path']
+        info.NarHash = subprocess.run(['nix', 'hash', 'to-base32', path_info['narHash']], stdout=subprocess.PIPE).stdout.decode().strip()
+        info.NarHash = "sha256:" + info.NarHash  #FIXME
+        info.NarSize = path_info['narSize']
+        for ref in path_info['references']:
+            info.References.append(os.path.basename(ref))
+
+        return info
+
+    def dump_nar(self, info: NarInfo) -> bytes:
+        return subprocess.run(['nix', 'nar', 'dump-path', info.StorePath], stdout=subprocess.PIPE).stdout
+
+    def get_closure(self, path: str, closure: typing.Optional[Closure] = None) -> Closure:
+        '''Get a closure from a nix store path
+        '''
+        if closure == None:
+            closure = Closure()
+
+        hash = hash_from_name(path)
+        if hash not in closure:
+            try:
+                closure[hash] = self.narinfo(path)
+
+                for ref in closure[hash].References:
+                   if hash_from_name(ref) != hash:
+                        closure = self.get_closure(ref, closure)
+            except:
+                None
+
+        return closure
+
+
 
 class NarStore:
     def __init__(self, store_dir: str):
@@ -108,58 +196,22 @@ class NarStore:
         self.by_hash = None
         self.by_url = None
 
+    def get_narinfo_name(self, hash):
+        return os.path.join(self.store_dir, hash + ".narinfo")
+
     def read_narinfo(self, hash: str) -> NarInfo:
         '''Read a narinfo file
         '''
-        with open(os.path.join(self.store_dir, hash + ".narinfo"), 'r') as file:
+        with open(self.get_narinfo_name(hash), 'r') as file:
             lines = file.read()
 
-        return self.parse_narinfo(lines)
+        return NarInfo(lines)
 
     def write_narinfo(self, hash: str, info: NarInfo):
         '''Write a .narinfo file
         '''
-
-        with open(os.path.join(self.store_dir, hash + ".narinfo"), 'w') as file:
-            file.write(self.narinfo_to_text(info))
-
-    def narinfo_to_text(self, info: NarInfo) -> str:
-
-        text = ""
-        for field in [a for a in dir(info) if not a.startswith('__')]:
-            value = getattr(info, field)
-            if type(value) == list:
-                if not value:
-                    value = None
-                else:
-                    value = " ".join(value)
-            if value != None:
-                text = text + field + ": " + str(value) + "\n"
-
-
-        return text
-
-
-    def parse_narinfo(self, text: str) -> NarInfo:
-        nar_info = NarInfo()
-
-        for line in text.split("\n"):
-            kv = line.split(': ')
-            if len(kv) == 2:
-                key = kv[0]
-                value = kv[1].strip()
-
-                if key == "Sig":
-                    nar_info.Sig.append(value)
-                elif key == "References":
-                    nar_info.References = value.split(" ")
-                    if len(nar_info.References) > 0 and len(nar_info.References[-1]) == 0:
-                        nar_info.References.pop()
-                else:
-                    setattr(nar_info, key, value)
-
-        return nar_info
-
+        with open(self.get_narinfo_name(hash), 'w') as file:
+            file.write(info.to_str())
 
     def get_closure(self, hash: str, narinfo_dict: typing.Optional[Closure] = None) -> Closure:
         '''Get a narinfo file and all dependcies
@@ -325,12 +377,17 @@ class NarStore:
         def check_caches(hash):
             for cache in cache_urls:
                 url = cache + "/" + hash + ".narinfo"
-                try:
-                    res = requests.get(url, timeout=10)
-                    if res.status_code == 200:
+
+                if url[0] == "/":
+                    if os.path.isfile(url):
                         return True
-                except:
-                    print("Warning download failed " + url, file=sys.stderr)
+                else:
+                    try:
+                        res = requests.get(url, timeout=10)
+                        if res.status_code == 200:
+                            return True
+                    except:
+                        print("Warning download failed " + url, file=sys.stderr)
 
             return False
 
@@ -360,25 +417,37 @@ class NarStore:
         for hash in hashes:
             for cache in cache_urls:
                 url = cache + "/" + hash + ".narinfo"
-                try:
-                    res = requests.get(url, timeout=3)
-                    if res.status_code == 200:
-                        info = self.parse_narinfo(res.text)
-                        with open(os.path.join(self.store_dir, hash + ".narinfo"), 'w') as file:
-                            file.write(res.text)
-                        res = requests.get(cache + "/" + info.URL, timeout=3)
+                if url[0] == "/":
+                    if os.path.isfile(url):
+                        with open(url, 'r') as file:
+                            info = NarInfo(file.read())
+
+                        os.system("cp " + url + " " + self.get_narinfo_name(hash))
+                        os.system("cp " + os.path.join(cache, info.URL) + " " + os.path.join(self.store_dir, info.URL))
+                else:
+                    try:
+                        res = requests.get(url, timeout=3)
                         if res.status_code == 200:
-                            with open(os.path.join(self.store_dir, info.URL), 'wb') as file:
-                                file.write(res.content)
+                            info = NarInfo(res.text)
+                            with open(os.path.join(self.store_dir, hash + ".narinfo"), 'w') as file:
+                                file.write(res.text)
+                            res = requests.get(cache + "/" + info.URL, timeout=3)
+                            if res.status_code == 200:
+                                with open(os.path.join(self.store_dir, info.URL), 'wb') as file:
+                                    file.write(res.content)
 
-                except:
-                    print("Warning download failed " + url, file=sys.stderr)
+                    except:
+                        print("Warning download failed " + url, file=sys.stderr)
 
-    def recompress_nar(self, hashes, compression: typing.Optional[str] = "xz"):
+    def recompress_nar(self, hashes, compression: str = "xz") -> tuple[int, int]:
         '''Recompress given NAR file and update narinfo
         '''
 
+        size_old = 0
+        size_new = 0
+
         nar_path = os.path.join(self.store_dir, 'nar')
+
         for hash in hashes:
             info = self.read_narinfo(hash)
 
@@ -394,6 +463,12 @@ class NarStore:
 
             cmd = cmd + os.path.join(self.store_dir, info.URL) + ' | '
 
+            if info.FileSize == None:
+                size_old = size_old + info.NarSize
+            else:
+                size_old = size_old + info.FileSize
+
+            old_compression = info.Compression
             # Target compression
             if compression == None or compression == "none":
                 cmd = cmd + 'cat > '
@@ -414,7 +489,7 @@ class NarStore:
             cmd = cmd + tmp_name
 
             # Compress file
-            print("re-compressing {}: {} -> {}".format(hash, info.Compression, compression))
+            print("re-compressing {}: {} -> {}".format(hash, old_compression, compression))
             os.system(cmd);
 
             # Get hash
@@ -425,13 +500,72 @@ class NarStore:
             else:
                 type = 'sha256'
                 file_hash = subprocess.run(['nix', 'hash', 'file', '--base32', '--type', type, tmp_name], stdout=subprocess.PIPE).stdout.decode().strip()
-                print(file_hash)
                 info.FileHash = type + ':' + file_hash
                 info.FileSize = os.path.getsize(tmp_name)
 
             new_url = os.path.join('nar', file_hash + '.nar' + ext)
-            print(new_url)
             os.system('mv ' + tmp_name + ' ' + os.path.join(self.store_dir, new_url))
 
             info.URL = new_url
             self.write_narinfo(hash, info)
+
+            if info.FileSize == None:
+                size_new = size_new + info.NarSize
+            else:
+                size_new = size_new + info.FileSize
+
+        return size_old, size_new
+
+    def nix_copy(self, nix_store_path: str, cache_urls: List[str] = [], compression: str = "xz") -> tuple[int, int]:
+        '''Copy a closure. If caches is given only paths not in cache will be copied
+        '''
+        nix_store = NixStore()
+        closure = nix_store.get_closure(nix_store_path)
+
+        pathlib.Path(os.path.join(self.store_dir, "nar")).mkdir(parents=True, exist_ok=True)
+
+        cached_hashes = []
+        if len(cache_urls) > 0:
+            cached_hashes = self.find_cached_hashes(closure, cache_urls=cache_urls)
+
+        copy_counter = 0
+        cache_counter = 0
+
+        for hash, info in closure.items():
+            # Skipped cached and existing paths
+            if hash not in cached_hashes and not os.path.isfile(self.get_narinfo_name(hash)):
+                print("copy: {}".format(info.StorePath))
+                info.URL = os.path.join("nar", info.NarHash[7:] + ".nar") #FIXME
+
+                nar_path = os.path.join(self.store_dir, info.URL)
+                with open(nar_path, 'wb') as nar:
+                    nar.write(nix_store.dump_nar(info))
+
+                if compression == "xz":
+                    os.system("xz " + nar_path)
+                    info.URL = info.URL + ".xz"
+                    nar_path = os.path.join(self.store_dir, info.URL)
+                elif compression == "zstd":
+                    os.system("zstd " + nar_path)
+                    info.URL = info.URL + ".zstd"
+                    nar_path = os.path.join(self.store_dir, info.URL)
+                elif compression == "none":
+                    None
+                else:
+                    raise(Exception("Invalid compression method"))
+
+                if compression != "none":
+                    type = 'sha256'
+                    file_hash = subprocess.run(['nix', 'hash', 'file', '--base32', '--type', type, nar_path], stdout=subprocess.PIPE).stdout.decode().strip()
+                    info.FileHash = type + ':' + file_hash
+                    info.FileSize = os.path.getsize(nar_path)
+
+                self.write_narinfo(hash, info)
+                copy_counter = copy_counter + 1
+            else:
+                print("skip: {} (cached)".format(info.StorePath))
+                cache_counter = cache_counter + 1
+
+        return copy_counter, cache_counter
+
+
