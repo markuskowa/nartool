@@ -5,7 +5,9 @@ import os
 import argparse as ap
 
 from .store import NarStore
+from .store import NixStore
 from .store import check_nix_hash
+from .store import hash_from_name
 
 def main():
     argsMain = ap.ArgumentParser(
@@ -22,6 +24,11 @@ def main():
     argsGetFiles.add_argument("-a", "--hash", help="Only get files for specific hash")
     argsGetFiles.add_argument("-l", "--listhashes", action='store_true', help="List nix store hashes instead of path names")
     argsGetFiles.add_argument("-r", "--relative", action='store_true', help="Path names relative to storedir")
+
+
+    argsGetDrvs = cmdArgs.add_parser("drvs", help="Get a list of .drvs references by the closure")
+    argsGetDrvs.add_argument("-a", "--hash", help="Only get files for specific hash")
+    argsGetDrvs.add_argument("-l", "--listhashes", action='store_true', help="List nix store hashes instead of path names")
 
     argsOrphans = cmdArgs.add_parser("orphans", help="Find orphaned NAR files")
     argsOrphans.add_argument("-n", "--nardir", help="NAR subdirectory relative to store dir. Defaults to 'nar'")
@@ -43,6 +50,7 @@ def main():
     argsCopy.add_argument("-z", "--compression", nargs=1, default=['xz'], help="Target compression [xz, zstd, none]")
     argsCopy.add_argument("-s", "--skipcached", action="store_true", help="Skip all paths available in cache")
     argsCopy.add_argument("-c", "--caches", nargs=1, default=["https://cache.nixos.org"], help="Comma separated list of cache URLs")
+    argsCopy.add_argument("-o", "--output", nargs='?', help="Write list of copied hashes to file")
     argsCopy.add_argument("path", help="Store path")
 
     args = argsMain.parse_args()
@@ -78,6 +86,22 @@ def main():
             files = ns.get_closure_files(closure, args.relative)
             for f in files:
                 print(f)
+
+    elif args.command == "drvs":
+        if args.hash == None:
+            closure, _ = ns.get_store()
+        else:
+            closure = ns.get_closure(check_nix_hash(args.hash))
+
+        drvs = ns.get_derivers(closure)
+
+        for drv in drvs:
+            if args.listhashes:
+                print(hash_from_name(drv))
+            else:
+                print(drv)
+
+
 
     elif args.command == "cache":
         if args.hash == None:
@@ -118,13 +142,23 @@ def main():
             print("Old size {}, new size {}, saved {} ({:.2f} %)".format(size_old, size_new, diff, perc))
 
     elif args.command == "nixcopy":
+        closure = NixStore().get_closure(os.path.realpath(args.path))
+
+        cached = 0
         if args.skipcached:
             caches = args.caches[0].split(",")
-        else:
-            caches = []
+            cached_hashes = ns.find_cached_hashes(closure, cache_urls=caches)
+            for hash in cached_hashes:
+                cached = cached + 1
+                info = closure.pop(hash)
+                print("skip: {} (cached)".format(info.StorePath), file=sys.stderr)
 
-        copied, cached = ns.nix_copy(os.path.realpath(args.path), caches, args.compression[0])
+        copied = ns.nix_copy(closure, args.compression[0])
         print("Copied {} paths, skipped {} cached paths".format(copied, cached))
+
+        if args.output is not None:
+            with open(args.output, 'w') as file:
+                file.write("\n".join(list(closure.keys())))
 
 if __name__ == '__main__':
     main()

@@ -164,6 +164,9 @@ class NixStore:
         for ref in path_info['references']:
             info.References.append(os.path.basename(ref))
 
+        if "deriver" in path_info:
+            info.Deriver = path_info['deriver']
+
         return info
 
     def dump_nar(self, info: NarInfo) -> bytes:
@@ -285,6 +288,19 @@ class NarStore:
         self.by_url = by_url
         return by_hash, by_url
 
+    def get_derivers(self, closure: Closure) -> List[str]:
+        '''Get all derivers named by closure
+        '''
+
+        drvs = []
+        for hash, info in closure.items():
+            if info.Deriver != None:
+                drv_path = info.Deriver
+
+                if drv_path not in closure:
+                    drvs.append(drv_path)
+
+        return drvs
 
     def verify_closure(self, closure: Closure) -> bool:
         '''
@@ -516,25 +532,18 @@ class NarStore:
 
         return size_old, size_new
 
-    def nix_copy(self, nix_store_path: str, cache_urls: List[str] = [], compression: str = "xz") -> tuple[int, int]:
+    def nix_copy(self, closure: Closure, compression: str = "xz") -> int:
         '''Copy a closure. If caches is given only paths not in cache will be copied
         '''
         nix_store = NixStore()
-        closure = nix_store.get_closure(nix_store_path)
-
         pathlib.Path(os.path.join(self.store_dir, "nar")).mkdir(parents=True, exist_ok=True)
 
-        cached_hashes = []
-        if len(cache_urls) > 0:
-            cached_hashes = self.find_cached_hashes(closure, cache_urls=cache_urls)
-
         copy_counter = 0
-        cache_counter = 0
 
         for hash, info in closure.items():
-            # Skipped cached and existing paths
-            if hash not in cached_hashes and not os.path.isfile(self.get_narinfo_name(hash)):
-                print("copy: {}".format(info.StorePath))
+            # Skip existing paths
+            if not os.path.isfile(self.get_narinfo_name(hash)):
+                print("copy: {}".format(info.StorePath), file=sys.stderr)
                 info.URL = os.path.join("nar", info.NarHash[7:] + ".nar") #FIXME
 
                 nar_path = os.path.join(self.store_dir, info.URL)
@@ -544,10 +553,12 @@ class NarStore:
                 if compression == "xz":
                     os.system("xz " + nar_path)
                     info.URL = info.URL + ".xz"
+                    info.Compression = "xz"
                     nar_path = os.path.join(self.store_dir, info.URL)
                 elif compression == "zstd":
-                    os.system("zstd " + nar_path)
+                    os.system("zstd --rm " + nar_path + " " + "-o " + nar_path + ".zstd")
                     info.URL = info.URL + ".zstd"
+                    info.Compression = "zstd"
                     nar_path = os.path.join(self.store_dir, info.URL)
                 elif compression == "none":
                     None
@@ -563,9 +574,8 @@ class NarStore:
                 self.write_narinfo(hash, info)
                 copy_counter = copy_counter + 1
             else:
-                print("skip: {} (cached)".format(info.StorePath))
-                cache_counter = cache_counter + 1
+                print("skip: {} (already present)".format(info.StorePath), file=sys.stderr)
 
-        return copy_counter, cache_counter
+        return copy_counter
 
 
