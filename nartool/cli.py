@@ -22,6 +22,7 @@ def main():
 
     argsGetFiles = cmdArgs.add_parser("get", help="Get a list of all files beloning to closure")
     argsGetFiles.add_argument("-a", "--hash", help="Only get files for specific hash")
+    argsGetFiles.add_argument("-i", "--input", nargs='?', help="Only get files for hashes in file")
     argsGetFiles.add_argument("-l", "--listhashes", action='store_true', help="List nix store hashes instead of path names")
     argsGetFiles.add_argument("-r", "--relative", action='store_true', help="Path names relative to storedir")
 
@@ -74,7 +75,12 @@ def main():
 
 
     elif args.command == "get":
-        if args.hash == None:
+        if args.input is not None:
+            with open(args.input, 'r') as file:
+                lines = file.read().split("\n")
+                hashes = list(filter(lambda line: line.strip() != '', lines))
+                closure = ns.get_closure_from_hashes(hashes)
+        elif args.hash == None:
             closure, _ = ns.get_store()
         else:
             closure = ns.get_closure(check_nix_hash(args.hash))
