@@ -26,6 +26,9 @@ def main():
     argsGetFiles.add_argument("-l", "--listhashes", action='store_true', help="List nix store hashes instead of path names")
     argsGetFiles.add_argument("-r", "--relative", action='store_true', help="Path names relative to storedir")
 
+    argsGetRefs = cmdArgs.add_parser("refs", help="Get a list of missing references")
+    argsGetRefs.add_argument("-a", "--hash", help="Only get files for specific hash")
+
 
     argsGetDrvs = cmdArgs.add_parser("drvs", help="Get a list of .drvs references by the closure")
     argsGetDrvs.add_argument("-a", "--hash", help="Only get files for specific hash")
@@ -72,7 +75,16 @@ def main():
 
         for i in orphans:
             print(i)
+    elif args.command == "refs":
+        if args.hash == None:
+            closure, _ = ns.get_store()
+        else:
+            closure = ns.get_closure(check_nix_hash(args.hash))
 
+        refs = ns.get_missing_refs(closure)
+
+        for hash in refs:
+            print(hash)
 
     elif args.command == "get":
         if args.input is not None:

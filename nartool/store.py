@@ -260,7 +260,7 @@ class NarStore:
             try:
                 closure[hash] = self.read_narinfo(hash)
             except:
-                print("Warning: " + hash + " not found in nar store")
+                print("Warning: " + hash + " not found in nar store", file=sys.stderr)
 
         return closure
 
@@ -431,8 +431,10 @@ class NarStore:
         '''
 
         for hash in hashes:
+            found = False
             for cache in cache_urls:
                 url = cache + "/" + hash + ".narinfo"
+                print("fetching {}".format(hash))
                 if url[0] == "/":
                     if os.path.isfile(url):
                         with open(url, 'r') as file:
@@ -440,10 +442,12 @@ class NarStore:
 
                         os.system("cp " + url + " " + self.get_narinfo_name(hash))
                         os.system("cp " + os.path.join(cache, info.URL) + " " + os.path.join(self.store_dir, info.URL))
+                        found = True
                 else:
                     try:
                         res = requests.get(url, timeout=3)
                         if res.status_code == 200:
+                            found = True
                             info = NarInfo(res.text)
                             with open(os.path.join(self.store_dir, hash + ".narinfo"), 'w') as file:
                                 file.write(res.text)
@@ -454,6 +458,10 @@ class NarStore:
 
                     except:
                         print("Warning download failed " + url, file=sys.stderr)
+
+            if not found:
+                print("Warning: file {} not found in any cache.".format(hash), file=sys.stderr)
+
 
     def recompress_nar(self, hashes, compression: str = "xz") -> tuple[int, int]:
         '''Recompress given NAR file and update narinfo
