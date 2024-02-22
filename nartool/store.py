@@ -310,7 +310,6 @@ class NarStore:
         for hash, info in closure.items():
             if not info.References and info.Deriver == None:  # FODs have no references
                 fods.append(hash)
-                print(info)
 
         return fods
 
