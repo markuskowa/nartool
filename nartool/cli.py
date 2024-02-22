@@ -34,6 +34,10 @@ def main():
     argsGetDrvs.add_argument("-a", "--hash", help="Only get files for specific hash")
     argsGetDrvs.add_argument("-l", "--listhashes", action='store_true', help="List nix store hashes instead of path names")
 
+    argsGetFODs = cmdArgs.add_parser("fods", help="Get a list of FODs in the closure")
+    argsGetFODs.add_argument("-a", "--hash", help="Only get files for specific hash")
+    argsGetFODs.add_argument("-l", "--listhashes", action='store_true', help="List nix store hashes instead of path names")
+
     argsOrphans = cmdArgs.add_parser("orphans", help="Find orphaned NAR files")
     argsOrphans.add_argument("-n", "--nardir", help="NAR subdirectory relative to store dir. Defaults to 'nar'")
 
@@ -119,6 +123,19 @@ def main():
             else:
                 print(drv)
 
+    elif args.command == "fods":
+        if args.hash == None:
+            closure, _ = ns.get_store()
+        else:
+            closure = ns.get_closure(check_nix_hash(args.hash))
+
+        fods = ns.get_FODs(closure)
+
+        for fod in fods:
+            if args.listhashes:
+                print(hash_from_name(fod))
+            else:
+                print(fod)
 
 
     elif args.command == "cache":

@@ -302,6 +302,19 @@ class NarStore:
 
         return drvs
 
+    def get_FODs(self, closure: Closure) -> List[str]:
+        '''Get all fixed output derivations (FODs) from closure
+        '''
+
+        fods = []
+        for hash, info in closure.items():
+            if not info.References and info.Deriver == None:  # FODs have no references
+                fods.append(hash)
+                print(info)
+
+        return fods
+
+
     def verify_closure(self, closure: Closure) -> bool:
         '''
             Check if NAR files are present and match in size
